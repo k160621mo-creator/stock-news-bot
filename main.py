@@ -1,39 +1,27 @@
 import os
 import json
-import time
 import urllib.parse
-from datetime import datetime, timezone, timedelta
 import requests
 from bs4 import BeautifulSoup
 
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 
-# 四大戰情追蹤組別
+# 專注於 0050 與大盤、台積電、美股動態
 SEARCH_TARGETS = [
     {
-        "category": "📊 0050 / 台指期 / 美股ADR（大盤與資金面）",
-        "keyword": "0050 OR 台指期 OR 台積電ADR OR 費城半導體",
+        "category": "📊 0050 / 台灣50成分股動態",
+        "keyword": "0050 OR 台灣50 OR 台積電法說 OR 0050 成份股",
         "color": 3066993  # 綠色
     },
     {
-        "category": "💵 匯率與三大法人籌碼（外資動向）",
-        "keyword": "台幣匯率 OR 外資買賣超 OR 三大法人期貨",
+        "category": "🇺🇸 美股ADR與大盤總經面",
+        "keyword": "台積電ADR OR 費城半導體 OR 美股四大指數 OR 外資買賣超",
         "color": 3447003  # 藍色
-    },
-    {
-        "category": "📺 友達 / 面板產業與報價",
-        "keyword": "友達 OR 面板報價 OR TrendForce 面板 OR 群創",
-        "color": 15105570 # 橘黃色
-    },
-    {
-        "category": "🤝 友達客戶、車用訂單與合作夥伴",
-        "keyword": "友達 車用 合作 OR 友達 訂單 OR 友達 供應鏈 OR 友達 車用面板",
-        "color": 10181046 # 紫色
     }
 ]
 
 def fetch_google_news(keyword, limit=2):
-    """預先爬取並整理新聞資料"""
+    """抓取精選新聞"""
     encoded_keyword = urllib.parse.quote(keyword)
     url = f"https://news.google.com/rss/search?q={encoded_keyword}&hl=zh-TW&gl=TW&ceid=TW:zh-Hant"
     
@@ -52,7 +40,6 @@ def fetch_google_news(keyword, limit=2):
             news_list.append({
                 "title": item.title.text if item.title else "無標題",
                 "link": item.link.text if item.link else "",
-                "date": item.pubDate.text if item.pubDate else "",
                 "source": item.source.text if item.source else "財經媒體"
             })
         return news_list
@@ -60,8 +47,30 @@ def fetch_google_news(keyword, limit=2):
         print(f"抓取 {keyword} 失敗: {e}")
         return []
 
-def prepare_embeds():
-    """整理好的 Discord 卡片資料"""
+def analyze_market_sentiment(embeds):
+    """分析大盤恐慌程度與買入投報率建議"""
+    text_blob = "".join([e["title"] for e in embeds])
+    
+    panic_keywords = ["重挫", "暴跌", "崩盤", "利空", "衰退", "砍倉", "恐慌", "下殺", "急跌"]
+    panic_count = sum(text_blob.count(kw) for kw in panic_keywords)
+    
+    if panic_count >= 2:
+        panic_level = "🔴 高恐慌 (市場悲觀，逢低分批佈局 0050 好時機)"
+        roi_advice = "預估長期年化投報率：約 12% ~ 18%（恐慌往往是市值型 ETF 的甜甜價，適合資金分批進場）"
+    elif panic_count == 1:
+        panic_level = "🟡 中度震盪 (多空交織，適合定期定額)"
+        roi_advice = "預估長期年化投報率：約 8% ~ 12%（維持紀律扣款，不急著一次買滿）"
+    else:
+        panic_level = "🟢 低恐慌 / 偏向樂觀 (情緒平穩)"
+        roi_advice = "預估長期年化投報率：約 6% ~ 10%（基期相對平穩，持續定期定額累積張數）"
+        
+    return panic_level, roi_advice
+
+def send_to_discord():
+    if not DISCORD_WEBHOOK_URL:
+        print("未設定 DISCORD_WEBHOOK_URL")
+        return
+
     embeds = []
     for target in SEARCH_TARGETS:
         news_items = fetch_google_news(target["keyword"], limit=2)
@@ -71,31 +80,18 @@ def prepare_embeds():
                 "url": item["link"],
                 "color": target["color"],
                 "author": {"name": target["category"]},
-                "footer": {"text": f"來源：{item['source']} | {item['date']}"}
+                "footer": {"text": f"來源：{item['source']}"}
             })
-    return embeds
 
-def wait_until_target_time(target_hour=11, target_minute=30):
-    """等待直到台灣時間 11:30"""
-    tz_taiwan = timezone(timedelta(hours=8))
-    now = datetime.now(tz_taiwan)
-    target_time = now.replace(hour=target_hour, minute=target_minute, second=0, microsecond=0)
-    
-    wait_seconds = (target_time - now).total_seconds()
-    if wait_seconds > 0:
-        print(f"[{now.strftime('%H:%M:%S')}] 資料已預先整理完成，將等待 {int(wait_seconds)} 秒，於 {target_hour}:{target_minute:02d} 推送至 Discord...")
-        time.sleep(wait_seconds)
-    else:
-        print(f"[{now.strftime('%H:%M:%S')}] 當前時間已過目標時間，立即發送！")
-
-def send_to_discord(embeds):
-    if not DISCORD_WEBHOOK_URL or not embeds:
-        print("未設定 DISCORD_WEBHOOK_URL 或無資料可發送")
+    if not embeds:
+        print("無新聞資料")
         return
 
+    panic_level, roi_advice = analyze_market_sentiment(embeds)
+
     payload = {
-        "username": "台股戰情小幫手",
-        "content": "☀️ **【午安！0050、大盤與 友達(車用/客戶) 最新消息早報】**",
+        "username": "0050 戰情小幫手",
+        "content": f"☀️ **【今日 0050 與大盤戰情快報】**\n\n🌡️ **市場恐慌指標**：{panic_level}\n💡 **投資評估建議**：{roi_advice}",
         "embeds": embeds
     }
 
@@ -107,11 +103,9 @@ def send_to_discord(embeds):
             timeout=10
         )
         if res.status_code == 204:
-            print("新聞成功推送至 Discord！")
+            print("0050 專用戰情順利發送至 Discord！")
     except Exception as e:
         print(f"發送 Discord 失敗: {e}")
 
 if __name__ == "__main__":
-    print("開始執行爬蟲預處理...")
-    embeds = prepare_embeds() 
-    send_to_discord(embeds)
+    send_to_discord()
