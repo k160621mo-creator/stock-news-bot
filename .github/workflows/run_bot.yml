@@ -1,10 +1,12 @@
-name: Panel & 0050 News Daily Schedule
+name: 0050 Daily News Schedule
 
 on:
   schedule:
-    # 台灣時間每日上午 10:45 (即 UTC 02:45) 自動啟動爬蟲預處理
-    - cron: '45 2 * * *'
-  workflow_dispatch: # 支援在 GitHub 網頁手動點擊測試
+    # 1. 台灣時間 11:30 (即 UTC 3:30) 推送早盤快報
+    - cron: '30 3 * * *'
+    # 2. 台灣時間 14:30 (即 UTC 6:30) 推送收盤統整
+    - cron: '30 6 * * *'
+  workflow_dispatch: # 支援手動測試
 
 jobs:
   run-crawler:
@@ -23,7 +25,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests beautifulsoup4 lxml
 
-      - name: Run Crawler Script
+      - name: Run Morning Session (11:30)
+        if: github.event.schedule == '30 3 * * *' || github.event_name == 'workflow_dispatch'
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-        run: python main.py
+        run: python main.py "早盤 11:30 戰情快報"
+
+      - name: Run Afternoon Session (14:30)
+        if: github.event.schedule == '30 6 * * *'
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: python main.py "下午 14:30 收盤統整"
