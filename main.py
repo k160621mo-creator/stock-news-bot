@@ -114,5 +114,4 @@ def send_to_discord(embeds):
 if __name__ == "__main__":
     print("開始執行爬蟲預處理...")
     embeds = prepare_embeds() 
-    wait_until_target_time(11, 30) 
     send_to_discord(embeds)
