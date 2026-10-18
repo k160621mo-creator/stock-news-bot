@@ -6,7 +6,6 @@ from bs4 import BeautifulSoup
 
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 
-# 專注於 0050 與大盤、台積電、美股動態
 SEARCH_TARGETS = [
     {
         "category": "📊 0050 / 台灣50成分股動態",
@@ -48,25 +47,35 @@ def fetch_google_news(keyword, limit=2):
         return []
 
 def analyze_market_sentiment(embeds):
-    """分析大盤恐慌程度與買入投報率建議"""
+    """精準分析市場情緒、恐慌程度與買入投報率建議"""
     text_blob = "".join([e["title"] for e in embeds])
     
-    panic_keywords = ["重挫", "暴跌", "崩盤", "利空", "衰退", "砍倉", "恐慌", "下殺", "急跌"]
-    panic_count = sum(text_blob.count(kw) for kw in panic_keywords)
+    # 定義多空關鍵字權重
+    panic_keywords = ["重挫", "暴跌", "崩盤", "利空", "衰退", "砍倉", "恐慌", "下殺", "急跌", "大跌", "利空出盡"]
+    bull_keywords = ["大漲", "飆高", "創高", "利多", "回神", "反彈", "樂觀", "買超", "噴出"]
     
-    if panic_count >= 2:
-        panic_level = "🔴 高恐慌 (市場悲觀，逢低分批佈局 0050 好時機)"
-        roi_advice = "預估長期年化投報率：約 12% ~ 18%（恐慌往往是市值型 ETF 的甜甜價，適合資金分批進場）"
-    elif panic_count == 1:
-        panic_level = "🟡 中度震盪 (多空交織，適合定期定額)"
-        roi_advice = "預估長期年化投報率：約 8% ~ 12%（維持紀律扣款，不急著一次買滿）"
+    panic_score = sum(text_blob.count(kw) for kw in panic_keywords)
+    bull_score = sum(text_blob.count(kw) for kw in bull_keywords)
+    
+    net_score = panic_score - bull_score
+    
+    # 根據淨分數確認恐慌程度與建議
+    if net_score >= 2:
+        panic_level = "🔴 高恐慌 / 市場悲觀 (逢低分批佈局 0050 好時機)"
+        roi_advice = "預估長期年化投報率：約 12% ~ 18%（恐慌往往是市值型 ETF 的甜甜價，建議資金分批進場）"
+    elif net_score == 1:
+        panic_level = "🟡 偏向不安 / 震盪整理 (多空拉鋸，適合定期定額)"
+        roi_advice = "預估長期年化投報率：約 9% ~ 13%（維持紀律定期定額，分批佈局不急躁）"
+    elif net_score == 0:
+        panic_level = "🟢 情緒平穩 / 正常波動 (市場觀望中)"
+        roi_advice = "預估長期年化投報率：約 8% ~ 11%（基期平穩，持續維持定期定額累積張數）"
     else:
-        panic_level = "🟢 低恐慌 / 偏向樂觀 (情緒平穩)"
-        roi_advice = "預估長期年化投報率：約 6% ~ 10%（基期相對平穩，持續定期定額累積張數）"
+        panic_level = "🔵 市場樂觀 / 氣氛偏多 (追高宜小心，紀律扣款)"
+        roi_advice = "預估長期年化投報率：約 6% ~ 9%（指數相對高檔，建議以平常心定期定額為主）"
         
     return panic_level, roi_advice
 
-def send_to_discord():
+def send_to_discord(session_title):
     if not DISCORD_WEBHOOK_URL:
         print("未設定 DISCORD_WEBHOOK_URL")
         return
@@ -91,7 +100,7 @@ def send_to_discord():
 
     payload = {
         "username": "0050 戰情小幫手",
-        "content": f"☀️ **【今日 0050 與大盤戰情快報】**\n\n🌡️ **市場恐慌指標**：{panic_level}\n💡 **投資評估建議**：{roi_advice}",
+        "content": f"🔔 **【0050 與大盤 {session_title}】**\n\n🌡️ **市場恐慌指標**：{panic_level}\n💡 **投報率評估建議**：{roi_advice}",
         "embeds": embeds
     }
 
@@ -103,9 +112,12 @@ def send_to_discord():
             timeout=10
         )
         if res.status_code == 204:
-            print("0050 專用戰情順利發送至 Discord！")
+            print(f"[{session_title}] 成功發送至 Discord！")
     except Exception as e:
         print(f"發送 Discord 失敗: {e}")
 
 if __name__ == "__main__":
-    send_to_discord()
+    import sys
+    # 透過命令列參數區分是「早盤」還是「收盤」
+    session = sys.argv[1] if len(sys.argv) > 1 else "早盤 11:30 戰情快報"
+    send_to_discord(session)
